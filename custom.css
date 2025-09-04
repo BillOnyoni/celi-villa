@@ -1,0 +1,9 @@
+/* assets/css/custom.css */
+body.dark-mode {
+  background: #121212;
+  color: #eee;
+}
+.dark-mode .navbar, .dark-mode footer, .dark-mode .card {
+  background: #1e1e1e !important;
+  color: #eee;
+}
