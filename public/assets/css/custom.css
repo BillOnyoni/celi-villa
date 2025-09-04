@@ -1,0 +1,104 @@
+/* public/assets/css/custom.css */
+
+/* Dark mode styles */
+body.dark-mode {
+  background: #121212;
+  color: #eee;
+}
+
+.dark-mode .navbar, 
+.dark-mode footer, 
+.dark-mode .card {
+  background: #1e1e1e !important;
+  color: #eee;
+}
+
+.dark-mode .card-header {
+  background: #2a2a2a !important;
+  border-bottom: 1px solid #333;
+}
+
+.dark-mode .table {
+  color: #eee;
+}
+
+.dark-mode .table-striped > tbody > tr:nth-of-type(odd) > td {
+  background-color: #2a2a2a;
+}
+
+/* Product card hover effects */
+.product-card {
+  transition: all 0.3s ease;
+  border: none;
+}
+
+.product-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
+}
+
+/* Hero section styling */
+.hero-section {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* Custom button styles */
+.btn-primary {
+  background: linear-gradient(45deg, #667eea, #764ba2);
+  border: none;
+  transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+/* Cart badge animation */
+.navbar .badge {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+/* Form styling */
+.form-control:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+/* Footer styling */
+footer {
+  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%) !important;
+}
+
+/* Loading animation for payment status */
+.payment-loading {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+  .hero-section .display-4 {
+    font-size: 2rem;
+  }
+  
+  .product-card {
+    margin-bottom: 1rem;
+  }
+}
