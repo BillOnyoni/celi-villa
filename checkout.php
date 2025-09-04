@@ -1,6 +1,13 @@
 <?php
 // checkout.php
 require_once 'includes/header.php';
+require_once 'config/mpesa.php';
+
+// Load environment variables
+if (file_exists(__DIR__ . '/config/env.php')) {
+    require_once 'config/env.php';
+}
+
 if (!isset($_SESSION['user_id'])) {
     redirect('/login.php');
 }
@@ -45,64 +52,44 @@ foreach ($cart as $pid => $qty) {
 }
 $stmtItem->close();
 
-// --- M-Pesa STK push ---
-$consumerKey = 'YOUR_CONSUMER_KEY';
-$consumerSecret = 'YOUR_CONSUMER_SECRET';
-$BusinessShortCode = '174379'; // sandbox example
-$Passkey = 'YOUR_PASSKEY';
-$Timestamp = date("YmdHis");
-$Password = base64_encode($BusinessShortCode.$Passkey.$Timestamp);
-
-// Amount and phone (collected from logged in user or ask here)
 $amount = (int)round($total);
-$phone = ''; // ask the user for phone if not in profile.
 
 if (isset($_POST['pay'])) {
-    $phone = preg_replace('/\D/', '', $_POST['phone']); // digits only
-    if (substr($phone, 0, 1) === '0') $phone = '254' . substr($phone, 1);
-    // Get access token
-    $curl = curl_init();
-    curl_setopt($curl, CURLOPT_URL, 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials');
-    curl_setopt($curl, CURLOPT_HTTPHEADER, ['Authorization: Basic '.base64_encode($consumerKey.':'.$consumerSecret)]);
-    curl_setopt($curl, CURLOPT_RETURNTRANSFER, TRUE);
-    $response = curl_exec($curl);
-    curl_close($curl);
-    $tokenJSON = json_decode($response, true);
-    $access_token = $tokenJSON['access_token'] ?? null;
-    if (!$access_token) {
-        $error = "Could not get access token. Check credentials and internet.";
-    } else {
-        $curl2 = curl_init('https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest');
-        $payload = [
-            "BusinessShortCode" => $BusinessShortCode,
-            "Password" => $Password,
-            "Timestamp" => $Timestamp,
-            "TransactionType" => "CustomerPayBillOnline",
-            "Amount" => $amount,
-            "PartyA" => $phone,
-            "PartyB" => $BusinessShortCode,
-            "PhoneNumber" => $phone,
-            "CallBackURL" => "https://your-public-domain/callback.php",
-            "AccountReference" => "Order-$order_id",
-            "TransactionDesc" => "Payment for order $order_id"
-        ];
-        curl_setopt($curl2, CURLOPT_HTTPHEADER, ['Content-Type:application/json','Authorization:Bearer '.$access_token]);
-        curl_setopt($curl2, CURLOPT_RETURNTRANSFER, TRUE);
-        curl_setopt($curl2, CURLOPT_POST, TRUE);
-        curl_setopt($curl2, CURLOPT_POSTFIELDS, json_encode($payload));
-        $response2 = curl_exec($curl2);
-        curl_close($curl2);
-        $resObj = json_decode($response2, true);
-        // store the STK request in payments table if available
-        $mpesa_code = $resObj['CheckoutRequestID'] ?? null;
-        $pstmt = $conn->prepare("INSERT INTO payments (user_id, order_id, amount, mpesa_code) VALUES (?,?,?,?)");
-        $pstmt->bind_param("iids", $_SESSION['user_id'], $order_id, $amount, $mpesa_code);
+    $phone = sanitize($_POST['phone']);
+    
+    try {
+        $mpesa = new MpesaAPI();
+        $callbackUrl = ($_ENV['SITE_URL'] ?? 'https://yourdomain.com') . '/callback.php';
+        
+        $response = $mpesa->stkPush(
+            $phone,
+            $amount,
+            "Order-$order_id",
+            "Payment for order $order_id",
+            $callbackUrl
+        );
+        
+        // Store the STK request in payments table
+        $checkoutRequestId = $response['CheckoutRequestID'];
+        $merchantRequestId = $response['MerchantRequestID'];
+        
+        $pstmt = $conn->prepare("INSERT INTO payments (user_id, order_id, amount, mpesa_code, merchant_request_id, status) VALUES (?,?,?,?,?,'pending')");
+        $pstmt->bind_param("iidss", $_SESSION['user_id'], $order_id, $amount, $checkoutRequestId, $merchantRequestId);
         $pstmt->execute();
         $pstmt->close();
-
-        $success = "STK request sent. Please approve payment on your phone.";
-        // empty cart only after mpesa callback marks order paid
-        unset($_SESSION['cart']);
+        
+        $success = "Payment request sent to your phone. Please enter your M-Pesa PIN to complete the transaction.";
+        
+        // Store order ID in session for status checking
+        $_SESSION['pending_order'] = $order_id;
+        
+    } catch (Exception $e) {
+        $error = "Payment failed: " . $e->getMessage();
+        
+        // Update order status to failed
+        $upd = $conn->prepare("UPDATE orders SET status = 'failed' WHERE order_id = ?");
+        $upd->bind_param("i", $order_id);
+        $upd->execute();
     }
 }
 ?>
@@ -116,12 +103,50 @@ if (isset($_POST['pay'])) {
 <form method="POST" class="row g-3">
   <div class="col-md-6">
     <label class="form-label">Phone (for M-Pesa)</label>
-    <input name="phone" value="<?php echo htmlspecialchars($_SESSION['phone'] ?? '07XXXXXXXX'); ?>" class="form-control" required>
+    <input name="phone" value="<?php echo htmlspecialchars($order['phone'] ?? '0712345678'); ?>" class="form-control" placeholder="0712345678" required>
+    <small class="form-text text-muted">Enter your Safaricom number (format: 0712345678)</small>
   </div>
   <div class="col-12">
     <button name="pay" class="btn btn-primary">Pay with M-Pesa (STK Push)</button>
     <a href="/cart.php" class="btn btn-secondary">Back to cart</a>
   </div>
 </form>
+
+<?php if (isset($_SESSION['pending_order'])): ?>
+<div class="mt-4">
+    <div class="alert alert-info">
+        <h5>Payment Status</h5>
+        <p>Waiting for payment confirmation...</p>
+        <button class="btn btn-sm btn-outline-primary" onclick="checkPaymentStatus(<?= $_SESSION['pending_order'] ?>)">Check Status</button>
+    </div>
+</div>
+
+<script>
+function checkPaymentStatus(orderId) {
+    fetch('/check_payment_status.php?order_id=' + orderId)
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'paid') {
+                alert('Payment successful! Redirecting to your orders...');
+                window.location.href = '/account.php';
+            } else if (data.status === 'failed') {
+                alert('Payment failed. Please try again.');
+                location.reload();
+            } else {
+                alert('Payment still pending. Please complete the transaction on your phone.');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error checking payment status');
+        });
+}
+
+// Auto-check payment status every 10 seconds
+<?php if (isset($_SESSION['pending_order'])): ?>
+setInterval(() => checkPaymentStatus(<?= $_SESSION['pending_order'] ?>), 10000);
+<?php endif; ?>
+</script>
+<?php endif; ?>
 
 <?php require_once 'includes/footer.php'; ?>

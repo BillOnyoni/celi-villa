@@ -1,0 +1,2 @@
+# This directory stores M-Pesa callback logs
+# Make sure this directory is writable by your web server
